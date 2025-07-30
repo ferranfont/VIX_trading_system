@@ -1,45 +1,58 @@
-# main.py
+import yfinance as yf
 import pandas as pd
-import os
-from chart_volume import plot_close_and_volume
+from chart_volume import plot_nasdaq_and_vix
 
 
-symbol = 'ES'
 
 # ====================================================
 # 📥 CARGA DE DATOS
 # ====================================================
 directorio = '../DATA'
-nombre_fichero = 'export_es_2015_formatted.csv'
-ruta_completa = os.path.join(directorio, nombre_fichero)
 
-print("\n======================== 🔍 df  ===========================")
-df = pd.read_csv(ruta_completa)
-print('Fichero:', ruta_completa, 'importado')
-print(f"Características del Fichero Base: {df.shape}")
+vix = yf.download('^VIX', start='2020-01-01', end='2025-07-30')
+vix = pd.DataFrame(vix)
 
-# Normalizar columnas a minúsculas y renombrar 'volumen' a 'volume'
-df.columns = [col.strip().lower() for col in df.columns]
-df = df.rename(columns={'volumen': 'volume'})
+# Eliminar niveles de columnas si es MultiIndex
+if isinstance(vix.columns, pd.MultiIndex):
+    vix.columns = vix.columns.droplevel(1)  # Quita 'Price'
+    vix.columns.name = None  # Quita el nombre del índice si lo tiene
 
-# Asegurar formato datetime con zona UTC
-df['date'] = pd.to_datetime(df['date'], utc=True)
-df = df.set_index('date')
+# Asegurar que sea solo columnas útiles (quita 'Ticker' si estuviera como fila o columna)
+vix = vix.drop(columns=['Ticker'], errors='ignore')
 
-# 🔁 Resample a velas diarias
-df_daily = df.resample('1D').agg({
-    'open': 'first',
-    'high': 'max',
-    'low': 'min',
-    'close': 'last',
-    'volume': 'sum'
-}).dropna()
+# Renombrar columnas a minúsculas
+vix.columns = [col.lower() for col in vix.columns]
 
-# Reset index para usar 'date' como columna
-df_daily = df_daily.reset_index()
+# Dejar solo la columna 'close' si quieres solo esa
+vix = vix[['close']]
+vix.rename(columns={'close': 'VIX'}, inplace=True)
+# Si 'Date' está como índice
+vix.reset_index(inplace=True)
+vix.rename(columns={'Date': 'date'}, inplace=True)
 
-print(df_daily.head())
+# Descarga de datos del SP600 y del NasdaQ
+tickers = ['SPY', 'QQQ']
+data = yf.download(tickers, start='2020-01-01', end='2025-07-30')
 
-# Ejecutar gráfico
-timeframe = '1D'
-plot_close_and_volume(symbol, timeframe, df_daily)
+close = data['Close'].rename(columns={'SPY': 'sp500', 'QQQ': 'nasdaq'})
+volume = data['Volume'].rename(columns={'SPY': 'sp500_volume_M', 'QQQ': 'nasdaq_volume_M'}) / 1_000_000
+close = close.round(2)*10
+volume = volume.round(2)
+
+df = pd.concat([close, volume], axis=1)
+
+# Eliminar nombre del eje de columnas
+df.columns.name = None
+
+df.reset_index(inplace=True)
+df.rename(columns={'Date': 'date'}, inplace=True)
+
+# Unir por la columna 'date'
+df = pd.merge(df, vix, on='date', how='left')
+df.set_index('date', inplace=True)
+
+# Mostrar resultado
+print(df)
+
+df.reset_index(inplace=True)  # esto crea la columna 'date' y elimina del índice
+plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df)
