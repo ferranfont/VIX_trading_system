@@ -1,8 +1,11 @@
 import yfinance as yf
 import os
+import ta
 import pandas as pd
-from chart_volume import plot_nasdaq_and_vix
+from chart_volume import plot_sp500_and_vix
 from quant_stat.find_vix_tops import find_vix_tops
+from strat_OM.strat_vix_long import strat_vix_entry_from_tops
+
 
 # ====================================================
 # 📥 CARGA DE DATOS
@@ -51,29 +54,60 @@ df.rename(columns={'Date': 'date'}, inplace=True)
 df = pd.merge(df, vix, on='date', how='left')
 df.set_index('date', inplace=True)
 
+
+
+
+
 # ====================================================
-# 🧠 CÁLCULO DEL ATR DINÁMICO SOBRE EL VIX
+# 🧠 CÁLCULO DEL ATR DINÁMICO SOBRE EL VIX  E INDICADORES
 # ====================================================
 
-n = 5 # Ventana de ATR
+n = 5    # Ventana de ATR
+p = 100  # Media de 200 periodos
 
 df['atr'] = df['VIX'].rolling(window=n).mean()
-print(df[['nasdaq', 'nasdaq_volume_M', 'VIX','atr']].tail(40))
+df['EMA'] = df['sp500'].rolling(window=p).mean().round(2)
+# Calcular Parabolic SAR
+# Simular high y low a partir de sp500 con ±0.5%
+df['high_sim'] = df['sp500'] * 1.005
+df['low_sim'] = df['sp500'] * 0.995
+
+# Calcular Parabolic SAR
+psar = ta.trend.PSARIndicator(
+    high=df['high_sim'],
+    low=df['low_sim'],
+    close=df['sp500']
+)
+df['parabolic_sar'] = psar.psar().round(2)
+
+print(df[['nasdaq', 'EMA', 'parabolic_sar', 'nasdaq_volume_M', 'VIX','atr']].tail(40))
+
 
 # ====================================================
 # 🔍 FIND VIX TOPS
 # ====================================================
 # Detectar techos del VIX
-window_top_value = 12
-factor_top_value = 1.3
+window_top_value = 10
+factor_top_value = 1.2
 
 tops = find_vix_tops(df, window_top=window_top_value, factor_top=factor_top_value)
 tops_df = pd.DataFrame(tops, columns=['tag', 'index_top_pos', 'VIX_top', 'top_confirm'])
 print(tops_df)
+
+
+# ====================================================
+# 🔍 STRATEGHY_ORDER_MANAGMENT
+# ====================================================
+
+result = strat_vix_entry_from_tops(df, tops_df)
+print(result)
 
 # ====================================================
 # 📊 GRAFICACIÓN
 # ====================================================
 
 df.reset_index(inplace=True)  # esto crea la columna 'date' y elimina del índice
-plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df)
+#plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
+plot_sp500_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
+
+
