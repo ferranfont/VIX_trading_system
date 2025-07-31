@@ -38,13 +38,17 @@ tickers = ['SPY', 'QQQ']
 data = yf.download(tickers, start='2020-01-01', end='2025-07-30')
 
 close = data['Close'].rename(columns={'SPY': 'sp500', 'QQQ': 'nasdaq'})
+high = data['High'].rename(columns={'SPY': 'high_sp500', 'QQQ': 'high_nasdaq'})
+low = data['Low'].rename(columns={'SPY': 'low_sp500', 'QQQ': 'low_nasdaq'})
 volume = data['Volume'].rename(columns={'SPY': 'sp500_volume_M', 'QQQ': 'nasdaq_volume_M'}) / 1_000_000
-close = close.round(2)*10
+close = close.round(2) * 10
+high = high.round(2) * 10
+low = low.round(2) * 10
 volume = volume.round(2)
 
-df = pd.concat([close, volume], axis=1)
 
-# Eliminar nombre del eje de columnas
+df = pd.concat([close, high, low, volume], axis=1)
+df.index.name = 'date'
 df.columns.name = None
 
 df.reset_index(inplace=True)
@@ -53,6 +57,7 @@ df.rename(columns={'Date': 'date'}, inplace=True)
 # Unir por la columna 'date'
 df = pd.merge(df, vix, on='date', how='left')
 df.set_index('date', inplace=True)
+print (df)
 
 
 
