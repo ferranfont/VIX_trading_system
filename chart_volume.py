@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 
-def plot_nasdaq_and_vix(symbol, timeframe, df):
+def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None):
     html_path = f'charts/nasdaq_vix_chart_{symbol}_{timeframe}.html'
     os.makedirs(os.path.dirname(html_path), exist_ok=True)
 
@@ -29,6 +29,26 @@ def plot_nasdaq_and_vix(symbol, timeframe, df):
         line=dict(color='blue', width=1.5)
     ), row=1, col=1, secondary_y=False)
 
+    # Flechas de tops confirmados en VIX (sobre Nasdaq, 2 pts por debajo)
+    if tops_df is not None and not tops_df.empty:
+        top_dates = tops_df['top_confirm']
+        top_vix_values = tops_df['top_confirm'].map(df.set_index('date')['nasdaq'])
+
+
+        fig.add_trace(go.Scatter(
+            x=top_dates,
+            y=top_vix_values - 2,  # 2 puntos por debajo del Nasdaq en esa fecha
+            mode='markers',
+            name='Top VIX Marker',
+            marker=dict(
+                symbol='triangle-up',
+                size=12,
+                color='green',
+                line=dict(width=1, color='darkgreen')
+            ),
+            hoverinfo='x+y+name'
+        ), row=1, col=1, secondary_y=False)
+
     # Línea del VIX (eje derecho)
     fig.add_trace(go.Scatter(
         x=df['date'],
@@ -36,6 +56,15 @@ def plot_nasdaq_and_vix(symbol, timeframe, df):
         mode='lines',
         name='VIX',
         line=dict(color='red', width=1.2, dash='solid')
+    ), row=1, col=1, secondary_y=True)
+
+    # Línea del VIX (eje derecho)
+    fig.add_trace(go.Scatter(
+        x=df['date'],
+        y=df['atr'],
+        mode='lines',
+        name='vix_trigger_high',
+        line=dict(color='green', width=1.2, dash='dot')
     ), row=1, col=1, secondary_y=True)
 
     # Barras de volumen Nasdaq
@@ -70,6 +99,33 @@ def plot_nasdaq_and_vix(symbol, timeframe, df):
             borderwidth=1
         )
     )
+
+    # Línea del VIX (eje derecho)
+    fig.add_trace(go.Scatter(
+        x=df['date'],
+        y=df['vix'],
+        mode='lines',
+        name='VIX',
+        line=dict(color='red', width=1.2, dash='solid')
+    ), row=1, col=1, secondary_y=True)
+
+    # 🔴 Punto rojo sobre la línea del VIX en el máximo pendiente (index_top_pos)
+    if tops_df is not None and not tops_df.empty:
+        fig.add_trace(go.Scatter(
+            x=tops_df['index_top_pos'],
+            y=tops_df['VIX_top'],
+            mode='markers',
+            name='Pending Max VIX',
+            marker=dict(
+                symbol='circle',
+                size=6,
+                color='red',
+                line=dict(width=1, color='darkred')
+            ),
+            hoverinfo='x+y+name'
+        ), row=1, col=1, secondary_y=True)
+
+
 
 
     fig.update_xaxes(
