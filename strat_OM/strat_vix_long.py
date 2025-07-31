@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import os
 import webbrowser
 
-def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_stop=2):
+def strat_vix_entry_from_tops(df, tops_df, atr_window=14, atr_multiplier_stop=3):
     df = df.copy()
     forward_days = 30
 
@@ -37,9 +37,7 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
         stop_loss = entry_price - atr_multiplier_stop * atr_val
 
         future_window = df.loc[date_entry:].iloc[1:forward_days+1]
-        initial_sar = df.loc[date_entry, 'parabolic_sar']
-        psar_below = initial_sar < entry_price  # True si SAR empieza por debajo
-
+        sar_below_started = False
         outcome, exit_price, exit_date = None, None, None
 
         for future_date, row_future in future_window.iterrows():
@@ -52,9 +50,9 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
                 exit_date = future_date
                 break
 
-            # Salida si cambia la dirección del SAR
-            sar_now_below = sar < price
-            if sar_now_below != psar_below:
+            if sar < price:
+                sar_below_started = True
+            elif sar_below_started and price < sar:
                 outcome = 'target'
                 exit_price = price
                 exit_date = future_date
@@ -82,7 +80,6 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
     result_df = pd.DataFrame(records)
     result_df['equity_usd'] = result_df['profit_usd'].cumsum()
 
-    # === Print resumen
     print("\n📊 Tracking Record Summary:")
     print(result_df[['entry_date', 'entry_price', 'exit_date', 'exit_price', 'outcome', 'profit_points', 'profit_usd']])
 
@@ -101,10 +98,9 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
     print(f"📈 Winrate: {winrate:.2f}%")
     print(f"📊 Avg Win: {avg_win:.2f} USD")
     print(f"📉 Avg Loss: {avg_loss:.2f} USD")
-    print(f"📐 Profit Ratio: {profit_ratio:.2f}")
+    print(f"📊 Profit Ratio: {profit_ratio:.2f}")
     print(f"💰 Total Profit: {total_usd:.2f} USD")
 
-    # === Equity curve
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=result_df['exit_date'],
@@ -116,7 +112,7 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
         hovertemplate='Date: %{x}<br>Equity: %{y:.2f} USD<extra></extra>'
     ))
     fig.update_layout(
-        title='💵 Cumulative Profit Curve (PSAR Exit)',
+        title='💵 Cumulative Profit Curve (PSAR Confirmed Exit)',
         xaxis_title='Exit Date',
         yaxis_title='Equity in USD',
         template='plotly_white',
@@ -124,7 +120,7 @@ def strat_vix_entry_with_psar_exit(df, tops_df, atr_window=14, atr_multiplier_st
         width=900
     )
 
-    output_path = 'charts/equity_curve_psar.html'
+    output_path = 'charts/equity_curve_psar_confirmed.html'
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.write_html(output_path)
     webbrowser.open('file://' + os.path.realpath(output_path))
