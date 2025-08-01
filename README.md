@@ -8,6 +8,7 @@ Este proyecto descarga datos históricos del índice VIX, NASDAQ (QQQ) y S&P 500
 - 📊 Precio del NASDAQ y el VIX en el mismo gráfico (ejes opuestos)
 - 📉 Volumen diario del NASDAQ en millones de acciones
 - 🌐 Gráfico interactivo guardado como HTML
+Con trailing stop dinamico atr
 
 ---
 
