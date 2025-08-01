@@ -1,118 +1,111 @@
+# FILE: main.py
+# FINAL CORRECTED VERSION - FIXES THE MERGEERROR
+
 import yfinance as yf
 import os
 import ta
 import pandas as pd
-from chart_volume import plot_sp500_and_vix
+from chart_volume import plot_nasdaq_and_vix
 from quant_stat.find_vix_tops import find_vix_tops
 from strat_OM.strat_vix_long import strat_vix_entry_from_tops
-
+from strat_OM.strat_ATR_stop_lost import calculate_dynamic_atr_trailing_stop
 
 # ====================================================
-# 📥 CARGA DE DATOS
+# 📅 CARGA DE DATOS SOLO NASDAQ (QQQ)
 # ====================================================
 directorio = '../DATA'
 
-vix = yf.download('^VIX', start='2020-01-01', end='2025-07-30')
+# --- VIX Data Loading (This part is correct) ---
+vix = yf.download('^VIX', start='2020-01-01', end='2025-08-01')
 vix = pd.DataFrame(vix)
-
-# Eliminar niveles de columnas si es MultiIndex
+# This block correctly handles the VIX columns if they are a MultiIndex
 if isinstance(vix.columns, pd.MultiIndex):
-    vix.columns = vix.columns.droplevel(1)  # Quita 'Price'
-    vix.columns.name = None  # Quita el nombre del índice si lo tiene
-
-# Asegurar que sea solo columnas útiles (quita 'Ticker' si estuviera como fila o columna)
+    vix.columns = vix.columns.droplevel(1)
+    vix.columns.name = None
 vix = vix.drop(columns=['Ticker'], errors='ignore')
-
-# Renombrar columnas a minúsculas
 vix.columns = [col.lower() for col in vix.columns]
-
-# Dejar solo la columna 'close' si quieres solo esa
 vix = vix[['close']]
 vix.rename(columns={'close': 'VIX'}, inplace=True)
-# Si 'Date' está como índice
 vix.reset_index(inplace=True)
 vix.rename(columns={'Date': 'date'}, inplace=True)
 
-# Descarga de datos del SP600 y del NasdaQ
-tickers = ['SPY', 'QQQ']
-data = yf.download(tickers, start='2020-01-01', end='2025-07-30')
+# =========================================================================
+# === QQQ Data Loading (CORRECTED SECTION TO FIX THE MERGEERROR)        ===
+# =========================================================================
+data = yf.download(['QQQ'], start='2020-01-01', end='2025-07-30')
 
-close = data['Close'].rename(columns={'SPY': 'sp500', 'QQQ': 'nasdaq'})
-high = data['High'].rename(columns={'SPY': 'high_sp500', 'QQQ': 'high_nasdaq'})
-low = data['Low'].rename(columns={'SPY': 'low_sp500', 'QQQ': 'low_nasdaq'})
-volume = data['Volume'].rename(columns={'SPY': 'sp500_volume_M', 'QQQ': 'nasdaq_volume_M'}) / 1_000_000
-close = close.round(2) * 10
-high = high.round(2) * 10
-low = low.round(2) * 10
-volume = volume.round(2)
+# ** THE FIX IS HERE **
+# If yfinance returns a MultiIndex (e.g., ('Close', 'QQQ')),
+# we flatten it to a single level (e.g., 'Close').
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.droplevel(1)
 
+# Now that the columns are flattened, we can proceed as before.
+df = data[['Close', 'High', 'Low', 'Volume']].copy()
+df.rename(columns={
+    'Close': 'nasdaq',
+    'High': 'high_nasdaq',
+    'Low': 'low_nasdaq',
+    'Volume': 'nasdaq_volume_M'
+}, inplace=True)
 
-df = pd.concat([close, high, low, volume], axis=1)
-df.index.name = 'date'
-df.columns.name = None
+# Perform scaling and calculations on the now-correctly-structured DataFrame
+df['nasdaq_volume_M'] = df['nasdaq_volume_M'] / 1_000_000
+df['nasdaq'] = df['nasdaq'].round(2) * 10
+df['high_nasdaq'] = df['high_nasdaq'].round(2) * 10
+df['low_nasdaq'] = df['low_nasdaq'].round(2) * 10
+df['nasdaq_volume_M'] = df['nasdaq_volume_M'].round(2)
 
+# Unir con VIX
 df.reset_index(inplace=True)
 df.rename(columns={'Date': 'date'}, inplace=True)
-
-# Unir por la columna 'date'
+# This merge will now work because both DataFrames have a single column level.
 df = pd.merge(df, vix, on='date', how='left')
 df.set_index('date', inplace=True)
-print (df)
-
-
-
 
 
 # ====================================================
-# 🧠 CÁLCULO DEL ATR DINÁMICO SOBRE EL VIX  E INDICADORES
+# 🧠 CÁLCULO DE INDICADORES (This logic is correct)
 # ====================================================
-
-n = 5    # Ventana de ATR
-p = 100  # Media de 200 periodos
-
+n = 5
+p = 100
 df['atr'] = df['VIX'].rolling(window=n).mean()
-df['EMA'] = df['sp500'].rolling(window=p).mean().round(2)
-# Calcular Parabolic SAR
-# Simular high y low a partir de sp500 con ±0.5%
-df['high_sim'] = df['sp500'] * 1.005
-df['low_sim'] = df['sp500'] * 0.995
+df['EMA'] = df['nasdaq'].rolling(window=p).mean().round(2)
 
-# Calcular Parabolic SAR
+atr_indicator = ta.volatility.AverageTrueRange(
+    high=df['high_nasdaq'],
+    low=df['low_nasdaq'],
+    close=df['nasdaq'],
+    window=14
+)
+df['nasdaq_atr'] = atr_indicator.average_true_range()
+
 psar = ta.trend.PSARIndicator(
-    high=df['high_sim'],
-    low=df['low_sim'],
-    close=df['sp500']
+    high=df['high_nasdaq'],
+    low=df['low_nasdaq'],
+    close=df['nasdaq'],
+    step=0.01,
+    max_step=0.1
 )
 df['parabolic_sar'] = psar.psar().round(2)
-
-print(df[['nasdaq', 'EMA', 'parabolic_sar', 'nasdaq_volume_M', 'VIX','atr']].tail(40))
-
+df['atr_trailing_stop'] = calculate_dynamic_atr_trailing_stop(df).round(2)
 
 # ====================================================
-# 🔍 FIND VIX TOPS
+# 🔍 FIND VIX TOPS (No changes needed)
 # ====================================================
-# Detectar techos del VIX
 window_top_value = 10
 factor_top_value = 1.2
-
-tops = find_vix_tops(df, window_top=window_top_value, factor_top=factor_top_value)
-tops_df = pd.DataFrame(tops, columns=['tag', 'index_top_pos', 'VIX_top', 'top_confirm'])
-print(tops_df)
-
+tops_df = pd.DataFrame(find_vix_tops(df.copy(), window_top=window_top_value, factor_top=factor_top_value),
+                       columns=['tag', 'index_top_pos', 'VIX_top', 'top_confirm'])
 
 # ====================================================
-# 🔍 STRATEGHY_ORDER_MANAGMENT
+# 🔍 STRATEGY ORDER MANAGEMENT (No changes needed)
 # ====================================================
-
 result = strat_vix_entry_from_tops(df, tops_df)
 print(result)
 
 # ====================================================
-# 📊 GRAFICACIÓN
+# 📊 GRAFICACIÓN (No changes needed)
 # ====================================================
-
-df.reset_index(inplace=True)  # esto crea la columna 'date' y elimina del índice
-#plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
-plot_sp500_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
-
-
+df.reset_index(inplace=True)
+plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
