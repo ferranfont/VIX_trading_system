@@ -145,5 +145,17 @@ def strat_vix_entry_from_tops(df, tops_df):
     fig_pct.write_html(path_pct)
     webbrowser.open('file://' + os.path.realpath(path_pct))
     print(f"✅ Generated Percentage Return comparison chart: '{path_pct}'")
+
+    # =========================================================================
+    # === NEW: Save the results DataFrame to a CSV file in the 'outputs' folder ===
+    # =========================================================================
+    output_dir = 'outputs'
+    os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
+    output_path = os.path.join(output_dir, 'tracking_record_VIX_long.csv')
+    
+    # Save the DataFrame to CSV. `index=False` is good practice unless the index is meaningful.
+    result_df.to_csv(output_path, index=False)
+    
+    print(f"💾 Strategy returns DataFrame saved to: '{output_path}'")
         
     return result_df
