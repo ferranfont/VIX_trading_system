@@ -151,7 +151,7 @@ def strat_vix_entry_from_tops(df, tops_df):
     # =========================================================================
     output_dir = 'outputs'
     os.makedirs(output_dir, exist_ok=True)  # Create the folder if it doesn't exist
-    output_path = os.path.join(output_dir, 'tracking_record_VIX_long.csv')
+    output_path = os.path.join(output_dir, 'tracking_record_VIX_ONLY_long.csv')
     
     # Save the DataFrame to CSV. `index=False` is good practice unless the index is meaningful.
     result_df.to_csv(output_path, index=False)

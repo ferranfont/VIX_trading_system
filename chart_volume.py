@@ -8,7 +8,7 @@ import numpy as np
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 
-def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None):
+def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None, hedge_trades_df=None):
     html_path = f'charts/nasdaq_vix_chart_{symbol}_{timeframe}.html'
     os.makedirs(os.path.dirname(html_path), exist_ok=True)
 
@@ -56,14 +56,21 @@ def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None):
         line=dict(color='blue', width=1.5)
     ), row=1, col=1, secondary_y=False)
 
-    '''
-    # --- NASDAQ EMA Line ---
-    if 'ema' in df.columns:
+    
+    # --- NASDAQ SLOW EMA Line ---
+    if 'sma_slow' in df.columns:
         fig.add_trace(go.Scatter(
-            x=df['date'], y=df['ema'], mode='lines', name='EMA',
+            x=df['date'], y=df['sma_slow'], mode='lines', name='sma_slow',
             line=dict(color='green', width=0.5)
         ), row=1, col=1, secondary_y=False)
-    '''        
+
+    # --- NASDAQ FAST EMA Line ---
+    if 'sma_fast' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=df['sma_fast'], mode='lines', name='sma_fast',
+            line=dict(color='turquoise', width=0.9)
+        ), row=1, col=1, secondary_y=False)
+           
     # --- ATR Trailing Stop Line (using our correctly filtered column) ---
     if 'active_atr_stop' in df.columns:
         fig.add_trace(go.Scatter(
@@ -88,6 +95,54 @@ def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None):
             x=df['date'], y=df['vix'], mode='lines', name='VIX',
             line=dict(color='red', width=1.2)
         ), row=1, col=1, secondary_y=True)
+
+    # --- Hedge Plotting ---
+    # ====================================================================================
+    # === NUEVA SECCIÓN: Ploteo de la Estrategia de Cobertura (Cortos)                 ===
+    # ====================================================================================
+    if hedge_trades_df is not None and not hedge_trades_df.empty:
+        # Entradas en Corto (Triángulo Rojo Hacia Abajo)
+        fig.add_trace(go.Scatter(
+            x=hedge_trades_df['entry_date'],
+            y=hedge_trades_df['entry_price'],
+            mode='markers',
+            name='Entrada Corto (Hedge)',
+            marker=dict(symbol='triangle-down', size=14, color='red', line=dict(width=1, color='darkred')),
+            hovertemplate='Entrada Corto: %{y:.2f}<extra></extra>'
+        ), row=1, col=1)
+
+        # Salidas de Corto (Cuadrados Verdes/Rojos)
+        for _, trade in hedge_trades_df.iterrows():
+            # Para un corto, ganancia si el precio de salida < entrada
+            color = 'green' if trade['profit_usd'] > 0 else 'red'
+
+            fig.add_trace(go.Scatter(
+                x=[trade['exit_date']],
+                y=[trade['exit_price']],
+                mode='markers',
+                marker=dict(symbol='square', size=8, color=color, line=dict(width=1, color='black')),
+                showlegend=False,
+                hovertemplate=f"Salida Corto: %{{y:.2f}}<br>Profit: ${trade['profit_usd'] :,.2f}<extra></extra>"
+            ), row=1, col=1)
+
+            # Línea que conecta la entrada y salida
+            fig.add_trace(go.Scatter(
+                x=[trade['entry_date'], trade['exit_date']],
+                y=[trade['entry_price'], trade['exit_price']],
+                mode='lines',
+                line=dict(color='red', width=1, dash='solid'),
+                showlegend=False
+            ), row=1, col=1)
+
+            
+            # Línea que conecta la entrada y salida de la cobertura
+            fig.add_trace(go.Scatter(
+                x=[trade['entry_date'], trade['exit_date']],
+                y=[trade['entry_price'], trade['exit_price']],
+                mode='lines',
+                line=dict(color='red', width=1, dash='solid'), 
+                showlegend=False
+            ), row=1, col=1)
 
     # --- Volume Bars ---
     if 'nasdaq_volume_m' in df.columns:

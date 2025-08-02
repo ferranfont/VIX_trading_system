@@ -8,30 +8,66 @@ import webbrowser
 import empyrical as emp
 
 # -------- CONFIG --------
-input_csv = "outputs/tracking_record_VIX_long.csv"
+# Rutas posibles
+hedged_csv = "outputs/VIX_strat_hedged.csv"
+long_only_csv = "outputs/tracking_record_VIX_ONLY_long.csv"
+
+# Mostrar menú al usuario
+print("\n📊 Selecciona el archivo de estrategia que deseas analizar:")
+print("1. Estrategia VIX (sin cobertura)")
+print("2. Estrategia VIX + Hedging (combinada) [default]")
+choice = input("Introduce 1 o 2 y pulsa ENTER (por defecto 2): ").strip()
+
+# Si el usuario no escribe nada, asumimos opción 2
+if choice == "":
+    choice = "2"
+
+# Lógica de selección
+if choice == "1":
+    if os.path.exists(long_only_csv):
+        input_csv = long_only_csv
+        print(f"\n✅ Usando solo la estrategia VIX: {input_csv}")
+    else:
+        raise FileNotFoundError(f"❌ No se encontró: {long_only_csv}")
+elif choice == "2":
+    if os.path.exists(hedged_csv):
+        input_csv = hedged_csv
+        print(f"\n✅ Usando estrategia combinada (VIX + Hedging): {input_csv}")
+    else:
+        raise FileNotFoundError(f"❌ No se encontró: {hedged_csv}")
+else:
+    raise ValueError("❌ Opción inválida. Por favor ejecuta de nuevo y elige 1 o 2.")
+
 initial_capital = 10000
-output_html_equity = "outputs/equity_tracking_curve.html"
-output_html_drawdown = "outputs/drawdown_curve.html"
+output_html_equity = "charts/equity_tracking_curve.html"
+output_html_drawdown = "charts/drawdown_curve.html"
 
 # -------- LOAD & PROCESS DATA --------
 df = pd.read_csv(input_csv, parse_dates=["entry_date", "exit_date"])
 df = df.sort_values("exit_date")
 
 # Cumulative equity curve
-df['equity'] = df['profit_usd'].cumsum() + initial_capital
-equity_curve = pd.Series(df['equity'].values, index=df['exit_date'])
+# Usa equity_usd si existe, o calcula desde profit_usd
+if 'equity_usd' in df.columns:
+    equity_curve = pd.Series(df['equity_usd'].values + initial_capital, index=df['exit_date'])
+else:
+    equity_curve = pd.Series(df['profit_usd'].cumsum().values + initial_capital, index=df['exit_date'])
+
+
+
 
 # Remove duplicates and forward fill
 equity_curve_daily = equity_curve.groupby(equity_curve.index.date).last()
 equity_curve_daily.index = pd.to_datetime(equity_curve_daily.index)
 equity_curve_daily = equity_curve_daily.asfreq("D").ffill()
-
+total_profit = df['profit_usd'].sum()
 returns = equity_curve_daily.pct_change().dropna()
 
 # -------- RATIOS --------
 ratios = {
+    "Total Profit ($)": total_profit,
     "Total Return (%)": (equity_curve_daily.iloc[-1] / equity_curve_daily.iloc[0] - 1) * 100,
-    "CAGR (%)": emp.annual_return(returns) * 100,
+    "Tasa Interés Compuesto (%)": emp.annual_return(returns) * 100,
     "Sharpe Ratio": emp.sharpe_ratio(returns),
     "Sortino Ratio": emp.sortino_ratio(returns),
     "Calmar Ratio": emp.calmar_ratio(returns),
@@ -45,7 +81,7 @@ ratios = {
 }
 
 # -------- PRINT RATIOS --------
-print("\n=========================================")
+print("=========================================")
 print("        📊 RATIO SUMMARY:")
 print("=========================================")
 print(pd.DataFrame(ratios, index=["Metrics"]).T.round(2))

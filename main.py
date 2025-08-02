@@ -5,10 +5,16 @@ import yfinance as yf
 import os
 import ta
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
 from chart_volume import plot_nasdaq_and_vix
 from quant_stat.find_vix_tops import find_vix_tops
 from strat_OM.strat_vix_long import strat_vix_entry_from_tops
 from strat_OM.strat_ATR_stop_lost import calculate_dynamic_atr_trailing_stop
+from strat_OM.strat_hedging_cross import strat_hedging_cross
+from strat_OM.strats_outputs_join import strats_outputs_join
+
+hedging_enabled = True   # False o True si queremos usar o no usar hedging
 
 # ====================================================
 # 📅 CARGA DE DATOS SOLO NASDAQ (QQQ)
@@ -68,9 +74,12 @@ df.set_index('date', inplace=True)
 # 🧠 CÁLCULO DE INDICADORES (This logic is correct)
 # ====================================================
 n = 5
-p = 100
+f = 50
+s = 200
+
 df['atr'] = df['VIX'].rolling(window=n).mean()
-df['EMA'] = df['nasdaq'].rolling(window=p).mean().round(2)
+df['sma_fast'] = df['nasdaq'].rolling(window=f).mean().round(2)
+df['sma_slow'] = df['nasdaq'].rolling(window=s).mean().round(2)
 
 atr_indicator = ta.volatility.AverageTrueRange(
     high=df['high_nasdaq'],
@@ -90,6 +99,8 @@ psar = ta.trend.PSARIndicator(
 df['parabolic_sar'] = psar.psar().round(2)
 df['atr_trailing_stop'] = calculate_dynamic_atr_trailing_stop(df).round(2)
 
+print(df)
+
 # ====================================================
 # 🔍 FIND VIX TOPS (No changes needed)
 # ====================================================
@@ -98,14 +109,34 @@ factor_top_value = 1.2
 tops_df = pd.DataFrame(find_vix_tops(df.copy(), window_top=window_top_value, factor_top=factor_top_value),
                        columns=['tag', 'index_top_pos', 'VIX_top', 'top_confirm'])
 
+# ================================================================================================
+# 🛡️         EJECUTAR LA ESTRATEGIA DE COBERTURA (HEDGING)
+# ================================================================================================
+hedge_trades_df = pd.DataFrame()  
+
+if hedging_enabled:
+    hedge_trades_df = strat_hedging_cross(
+        df=df,
+        fast_ma_col='sma_fast',
+        slow_ma_col='sma_slow'
+    )
+
+print(hedge_trades_df)
+
 # ====================================================
 # 🔍 STRATEGY ORDER MANAGEMENT (No changes needed)
 # ====================================================
 result = strat_vix_entry_from_tops(df, tops_df)
 print(result)
 
+# ==============================================================================
+# 🔹 COMBINAR Y MOSTRAR TODOS LOS REGISTROS DE OPERACIONES (LONG + HEDGE)
+# ==============================================================================
+
+combined_trades_sorted = strats_outputs_join(result, hedge_trades_df)
+
 # ====================================================
 # 📊 GRAFICACIÓN (No changes needed)
 # ====================================================
 df.reset_index(inplace=True)
-plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result)
+plot_nasdaq_and_vix(symbol='NASDAQ', timeframe='daily', df=df, tops_df=tops_df, trades_df=result,hedge_trades_df=hedge_trades_df)
