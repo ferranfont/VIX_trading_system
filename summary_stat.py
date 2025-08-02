@@ -45,8 +45,11 @@ ratios = {
 }
 
 # -------- PRINT RATIOS --------
-print("\n📊 RATIO SUMMARY:")
+print("\n=========================================")
+print("        📊 RATIO SUMMARY:")
+print("=========================================")
 print(pd.DataFrame(ratios, index=["Metrics"]).T.round(2))
+print("=========================================")
 
 # -------- EQUITY CURVE PLOT --------
 df['day'] = df['exit_date'].dt.date
