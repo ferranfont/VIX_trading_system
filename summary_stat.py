@@ -7,38 +7,39 @@ import os
 import webbrowser
 import empyrical as emp
 
-# -------- CONFIG --------
-# Rutas posibles
-hedged_csv = "outputs/VIX_strat_hedged.csv"
-long_only_csv = "outputs/tracking_record_VIX_ONLY_long.csv"
+initial_capital = 10000
 
-# Mostrar menú al usuario
-print("\n📊 Selecciona el archivo de estrategia que deseas analizar:")
+# -------- CONFIG --------
+hedged_csv = "outputs/combined_trades_log.csv"       # contiene VIX + cobertura
+long_only_csv = "outputs/tracking_record_VIX_ONLY_long.csv"  # solo estrategia VIX
+
+# -------- MENÚ --------
+print("\n\U0001f4ca Selecciona el archivo de estrategia que deseas analizar:")
 print("1. Estrategia VIX (sin cobertura)")
 print("2. Estrategia VIX + Hedging (combinada) [default]")
 choice = input("Introduce 1 o 2 y pulsa ENTER (por defecto 2): ").strip()
 
-# Si el usuario no escribe nada, asumimos opción 2
 if choice == "":
     choice = "2"
 
-# Lógica de selección
+# -------- LÓGICA --------
 if choice == "1":
     if os.path.exists(long_only_csv):
         input_csv = long_only_csv
+        chart_label = " - No Hedging"
         print(f"\n✅ Usando solo la estrategia VIX: {input_csv}")
     else:
         raise FileNotFoundError(f"❌ No se encontró: {long_only_csv}")
 elif choice == "2":
     if os.path.exists(hedged_csv):
         input_csv = hedged_csv
+        chart_label = " - Hedging"
         print(f"\n✅ Usando estrategia combinada (VIX + Hedging): {input_csv}")
     else:
         raise FileNotFoundError(f"❌ No se encontró: {hedged_csv}")
 else:
-    raise ValueError("❌ Opción inválida. Por favor ejecuta de nuevo y elige 1 o 2.")
+    raise ValueError("❌ Opcion inválida. Por favor ejecuta de nuevo y elige 1 o 2.")
 
-initial_capital = 10000
 output_html_equity = "charts/equity_tracking_curve.html"
 output_html_drawdown = "charts/drawdown_curve.html"
 
@@ -47,14 +48,10 @@ df = pd.read_csv(input_csv, parse_dates=["entry_date", "exit_date"])
 df = df.sort_values("exit_date")
 
 # Cumulative equity curve
-# Usa equity_usd si existe, o calcula desde profit_usd
 if 'equity_usd' in df.columns:
     equity_curve = pd.Series(df['equity_usd'].values + initial_capital, index=df['exit_date'])
 else:
     equity_curve = pd.Series(df['profit_usd'].cumsum().values + initial_capital, index=df['exit_date'])
-
-
-
 
 # Remove duplicates and forward fill
 equity_curve_daily = equity_curve.groupby(equity_curve.index.date).last()
@@ -80,9 +77,8 @@ ratios = {
     "Number of Trades": len(df)
 }
 
-# -------- PRINT RATIOS --------
 print("=========================================")
-print("        📊 RATIO SUMMARY:")
+print("        \U0001f4ca RATIO SUMMARY:")
 print("=========================================")
 print(pd.DataFrame(ratios, index=["Metrics"]).T.round(2))
 print("=========================================")
@@ -111,7 +107,7 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.update_layout(
-    title='✅ Cumulative Equity Curve (Green = Gain, Red = Loss)',
+    title=f'✅ Cumulative Equity Curve{chart_label}',
     xaxis_title='Date',
     yaxis_title='Equity ($)',
     width=1400, height=800,
@@ -122,9 +118,9 @@ fig.update_layout(
 
 fig.write_html(output_html_equity, auto_open=False)
 webbrowser.open('file://' + os.path.realpath(output_html_equity))
-print(f"\n📈 Equity curve saved to: {output_html_equity}")
+print(f"\n\U0001f4c8 Equity curve saved to: {output_html_equity}")
 
-# -------- DRAWDOWN CHART (New) --------
+# -------- DRAWDOWN CHART --------
 rolling_max = equity_curve_daily.cummax()
 drawdown_pct = (equity_curve_daily - rolling_max) / rolling_max
 
@@ -139,7 +135,7 @@ fig_dd.add_trace(go.Scatter(
     name='Drawdown (%)'
 ))
 fig_dd.update_layout(
-    title='📉 Drawdown Curve',
+    title=f'\U0001f4c9 Drawdown Curve{chart_label}',
     xaxis_title='Date',
     yaxis_title='Drawdown (%)',
     width=1400,
@@ -151,4 +147,4 @@ fig_dd.update_layout(
 
 fig_dd.write_html(output_html_drawdown, auto_open=False)
 webbrowser.open('file://' + os.path.realpath(output_html_drawdown))
-print(f"\n📉 Drawdown chart saved to: {output_html_drawdown}")
+print(f"\n\U0001f4c9 Drawdown chart saved to: {output_html_drawdown}")

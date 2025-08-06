@@ -1,5 +1,5 @@
 # FILE: chart_volume.py
-# FINAL CORRECTED VERSION
+# VERSIÓN ACTUALIZADA: Plotea el ATR Trailing Stop para largos (verde) y para cortos (rojo).
 
 import os
 import webbrowser
@@ -8,7 +8,7 @@ import numpy as np
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 
-def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None, hedge_trades_df=None):
+def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None, hedge_trades_df=None, hedge_trades_df_slow_ema= None):
     html_path = f'charts/nasdaq_vix_chart_{symbol}_{timeframe}.html'
     os.makedirs(os.path.dirname(html_path), exist_ok=True)
 
@@ -16,167 +16,132 @@ def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None, hed
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date')
 
-    # =================================================================================
-    # === FINAL FIX: Plot the stop ONLY when it is VALID (below the price)          ===
-    # =================================================================================
+    # --- Prepara el ATR dinámico para plotear (para la estrategia de LARGOS) ---
     if trades_df is not None and not trades_df.empty and 'atr_trailing_stop' in df.columns:
-        # Start with a new column full of NaNs
         df['active_atr_stop'] = np.nan
-        
-        # For each trade, we'll apply the new plotting rule
         for _, trade in trades_df.iterrows():
             if pd.notna(trade['exit_date']) and pd.notna(trade['entry_date']):
-                # 1. Identify the time window for the current trade.
                 mask = (df['date'] >= trade['entry_date']) & (df['date'] <= trade['exit_date'])
-                
-                # 2. Get the series for the price and the stop within this window
                 prices_in_window = df.loc[mask, 'nasdaq']
                 stops_in_window = df.loc[mask, 'atr_trailing_stop']
-
-                # 3. **THE FIX**: Use .where() to keep the stop value only if it's
-                #    less than or equal to the price. Otherwise, replace it with NaN.
-                #    This prevents the green line from ever being drawn above the blue line.
                 valid_stops = stops_in_window.where(stops_in_window <= prices_in_window, np.nan)
-                
-                # 4. Assign these "cleaned" stops to our plotting column
                 df.loc[mask, 'active_atr_stop'] = valid_stops
-    # =================================================================================
-
+    
     fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        row_heights=[0.80, 0.20],
-        vertical_spacing=0.03,
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.8, 0.2], vertical_spacing=0.03,
         specs=[[{"secondary_y": True}], [{}]]
     )
 
-    # --- NASDAQ Price Line ---
-    fig.add_trace(go.Scatter(
-        x=df['date'], y=df['nasdaq'], mode='lines', name='NASDAQ',
-        line=dict(color='blue', width=1.5)
-    ), row=1, col=1, secondary_y=False)
-
-    
-    # --- NASDAQ SLOW EMA Line ---
+    # --- Trazo del Precio y Medias Móviles ---
+    fig.add_trace(go.Scatter(x=df['date'], y=df['nasdaq'], mode='lines', name='NASDAQ', line=dict(color='blue', width=1.5)), row=1, col=1)
     if 'sma_slow' in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df['date'], y=df['sma_slow'], mode='lines', name='sma_slow',
-            line=dict(color='green', width=0.5)
-        ), row=1, col=1, secondary_y=False)
-
-    # --- NASDAQ FAST EMA Line ---
+        fig.add_trace(go.Scatter(x=df['date'], y=df['sma_slow'], mode='lines', name='SMA Lenta', line=dict(color='green', width=0.7)), row=1, col=1)
     if 'sma_fast' in df.columns:
+        fig.add_trace(go.Scatter(x=df['date'], y=df['sma_fast'], mode='lines', name='SMA Rápida', line=dict(color='turquoise', width=0.9)), row=1, col=1)
+    
+    # 🔸 Añadir círculos naranjas donde hay picos de VIX (vix_spike == True)
+    if 'vix_spike' in df.columns:
+        spike_points = df[df['vix_spike'] == True]
         fig.add_trace(go.Scatter(
-            x=df['date'], y=df['sma_fast'], mode='lines', name='sma_fast',
-            line=dict(color='turquoise', width=0.9)
-        ), row=1, col=1, secondary_y=False)
-           
-    # --- ATR Trailing Stop Line (using our correctly filtered column) ---
+            x=spike_points['date'],
+            y=spike_points['nasdaq'],
+            mode='markers',
+            name='VIX Spike',
+            marker=dict(
+                size=7,
+                color='orange',
+                symbol='circle'
+            )
+        ), row=1, col=1)
+
+    # 🔸 Añadir círculos naranjas sobre la línea roja del VIX (eje secundario)
+    if 'vix_spike' in df.columns:
+        spike_points = df[df['vix_spike'] == True]
+        fig.add_trace(go.Scatter(
+            x=spike_points['date'],
+            y=spike_points['vix'],  # Asegúrate que esta columna existe
+            mode='markers',
+            name='VIX Spike',
+            marker=dict(
+                size=8,
+                color='orange',
+                symbol='circle'
+            )
+        ), row=1, col=1, secondary_y=True)  # 👈 Esto es lo importante
+
+
+    # --- ATR Trailing Stop Line (para Largos) ---
     if 'active_atr_stop' in df.columns:
         fig.add_trace(go.Scatter(
             x=df['date'], y=df['active_atr_stop'], mode='lines',
-            name='ATR Trailing Stop',
+            name='ATR Trailing Stop (Long)',
             line=dict(color='green', width=1.5, dash='solid'),
-            connectgaps=False, # Ensures NaNs create breaks in the line
-            hovertemplate='Date: %{x}<br>ATR Stop: %{y:.2f}<extra></extra>'
-        ), row=1, col=1, secondary_y=False)
-    
-    # --- Entry Signals (Triangles) ---
-    if trades_df is not None and not trades_df.empty:
-        fig.add_trace(go.Scatter(
-            x=trades_df['entry_date'], y=trades_df['entry_price'], mode='markers', name='Entry Signal',
-            marker=dict(symbol='triangle-up', size=12, color='green', line=dict(width=1, color='darkgreen')),
-            hovertemplate='Entry Date: %{x}<br>Entry Price: %{y}<extra></extra>'
-        ), row=1, col=1, secondary_y=False)
-
-    # --- VIX Line ---
-    if 'vix' in df.columns:
-        fig.add_trace(go.Scatter(
-            x=df['date'], y=df['vix'], mode='lines', name='VIX',
-            line=dict(color='red', width=1.2)
-        ), row=1, col=1, secondary_y=True)
-
-    # --- Hedge Plotting ---
-    # ====================================================================================
-    # === NUEVA SECCIÓN: Ploteo de la Estrategia de Cobertura (Cortos)                 ===
-    # ====================================================================================
-    if hedge_trades_df is not None and not hedge_trades_df.empty:
-        # Entradas en Corto (Triángulo Rojo Hacia Abajo)
-        fig.add_trace(go.Scatter(
-            x=hedge_trades_df['entry_date'],
-            y=hedge_trades_df['entry_price'],
-            mode='markers',
-            name='Entrada Corto (Hedge)',
-            marker=dict(symbol='triangle-down', size=14, color='red', line=dict(width=1, color='darkred')),
-            hovertemplate='Entrada Corto: %{y:.2f}<extra></extra>'
+            connectgaps=False
         ), row=1, col=1)
-
-        # Salidas de Corto (Cuadrados Verdes/Rojos)
-        for _, trade in hedge_trades_df.iterrows():
-            # Para un corto, ganancia si el precio de salida < entrada
-            color = 'green' if trade['profit_usd'] > 0 else 'red'
-
-            fig.add_trace(go.Scatter(
-                x=[trade['exit_date']],
-                y=[trade['exit_price']],
-                mode='markers',
-                marker=dict(symbol='square', size=8, color=color, line=dict(width=1, color='black')),
-                showlegend=False,
-                hovertemplate=f"Salida Corto: %{{y:.2f}}<br>Profit: ${trade['profit_usd'] :,.2f}<extra></extra>"
-            ), row=1, col=1)
-
-            # Línea que conecta la entrada y salida
-            fig.add_trace(go.Scatter(
-                x=[trade['entry_date'], trade['exit_date']],
-                y=[trade['entry_price'], trade['exit_price']],
-                mode='lines',
-                line=dict(color='red', width=1, dash='solid'),
-                showlegend=False
-            ), row=1, col=1)
-
-            
-            # Línea que conecta la entrada y salida de la cobertura
-            fig.add_trace(go.Scatter(
-                x=[trade['entry_date'], trade['exit_date']],
-                y=[trade['entry_price'], trade['exit_price']],
-                mode='lines',
-                line=dict(color='red', width=1, dash='solid'), 
-                showlegend=False
-            ), row=1, col=1)
-
-    # --- Volume Bars ---
-    if 'nasdaq_volume_m' in df.columns:
-        fig.add_trace(go.Bar(
-            x=df['date'], y=df['nasdaq_volume_m'],
-            marker_color='blue', name='NASDAQ Volume (M)'
-        ), row=2, col=1)
-
-    # --- Trade Exit Markers (Squares) with Profit/Loss Coloring ---
+    
+    # --- Ploteo de la Estrategia Principal (Largos) ---
     if trades_df is not None and not trades_df.empty:
+        fig.add_trace(go.Scatter(x=trades_df['entry_date'], y=trades_df['entry_price'], mode='markers', name='Entrada Largo', marker=dict(symbol='triangle-up', size=12, color='green', line=dict(width=1, color='darkgreen'))), row=1, col=1)
         for _, trade in trades_df.iterrows():
             color = 'green' if trade['profit_usd'] > 0 else 'red'
-            fig.add_trace(go.Scatter(
-                x=[trade['exit_date']], y=[trade['exit_price']], mode='markers',
-                marker=dict(symbol='square', size=8, color=color, line=dict(width=1, color='black')),
-                showlegend=False,
-                hovertemplate=f"Exit: {trade['exit_price']:.2f}<br>P/L: {trade['profit_usd']:.2f} USD<extra></extra>"
-            ), row=1, col=1, secondary_y=False)
-            fig.add_trace(go.Scatter(
-                x=[trade['entry_date'], trade['exit_date']], y=[trade['entry_price'], trade['exit_price']],
-                mode='lines', line=dict(color='gray', width=1), showlegend=False
-            ), row=1, col=1, secondary_y=False)
+            fig.add_trace(go.Scatter(x=[trade['exit_date']], y=[trade['exit_price']], mode='markers', marker=dict(symbol='square', size=8, color=color, line=dict(width=1, color='black')), showlegend=False), row=1, col=1)
+            fig.add_trace(go.Scatter(x=[trade['entry_date'], trade['exit_date']], y=[trade['entry_price'], trade['exit_price']], mode='lines', line=dict(color='gray', width=1), showlegend=False), row=1, col=1)
 
-    # --- VIX Tops ---
-    if tops_df is not None and not tops_df.empty:
+    # --- Ploteo de la Estrategia de Cobertura (Cortos) ---
+    if hedge_trades_df is not None and not hedge_trades_df.empty:
+        fig.add_trace(go.Scatter(x=hedge_trades_df['hedge_entry_date'], y=hedge_trades_df['hedge_entry_price'], mode='markers', name='Entrada Corto (Hedge)', marker=dict(symbol='triangle-down', size=10, color='red', line=dict(width=1, color='darkred'))), row=1, col=1)
+        for _, trade in hedge_trades_df.iterrows():
+            color = 'green' if trade['hedge_profit_usd'] > 0 else 'red'
+            fig.add_trace(go.Scatter(x=[trade['hedge_exit_date']], y=[trade['hedge_exit_price']], mode='markers', marker=dict(symbol='square', size=8, color=color, line=dict(width=1, color='black')), showlegend=False), row=1, col=1)
+            fig.add_trace(go.Scatter(x=[trade['hedge_entry_date'], trade['hedge_exit_date']], y=[trade['hedge_entry_price'], trade['hedge_exit_price']], mode='lines', line=dict(color='red', width=1, dash='solid'), showlegend=False), row=1, col=1)
+    
+    # --- Ploteo de Entradas de Cobertura Corto con Triángulo Invertido Rojo ---
+    if hedge_trades_df_slow_ema is not None and not hedge_trades_df_slow_ema.empty:
         fig.add_trace(go.Scatter(
-            x=tops_df['index_top_pos'], y=tops_df['VIX_top'], mode='markers', name='VIX Tops',
-            marker=dict(symbol='circle', size=6, color='red', line=dict(width=1, color='darkred')),
-        ), row=1, col=1, secondary_y=True)
+            x=hedge_trades_df_slow_ema['hedge_entry_date'],
+            y=hedge_trades_df_slow_ema['hedge_entry_price'],
+            mode='markers',
+            name='Entrada Corto (Hedge)',
+            marker=dict(
+                symbol='triangle-down',
+                size=10,
+                color='red',
+                line=dict(width=1, color='darkred')
+            )
+        ), row=1, col=1)
 
-    # --- Axes and Layout ---
-    fig.update_xaxes(type='date', tickformat="%b %d<br>%Y", row=1, col=1)
-    fig.update_xaxes(range=[df['date'].min(), df['date'].max()])
-    fig.update_yaxes(title_text="NASDAQ", row=1, col=1, secondary_y=False)
+    # Cuadrados de salida
+    for _, trade in hedge_trades_df_slow_ema.iterrows():
+        color = 'green' if trade['hedge_profit_usd'] > 0 else 'red'
+        fig.add_trace(go.Scatter(
+            x=[trade['hedge_exit_date']],
+            y=[trade['hedge_exit_price']],
+            mode='markers',
+            marker=dict(symbol='square', size=10, color=color, line=dict(width=1, color='black')),
+            name='Salida Corto (EMA)',
+            showlegend=False
+        ), row=1, col=1)
+
+        # Línea entre entrada y salida
+        fig.add_trace(go.Scatter(
+            x=[trade['hedge_entry_date'], trade['hedge_exit_date']],
+            y=[trade['hedge_entry_price'], trade['hedge_exit_price']],
+            mode='lines',
+            line=dict(color='grey', width=1, dash='solid'),
+            showlegend=False
+        ), row=1, col=1)
+
+    # --- Ploteo de VIX, Volumen y Ejes ---
+    if 'vix' in df.columns:
+        fig.add_trace(go.Scatter(x=df['date'], y=df['vix'], mode='lines', name='VIX', line=dict(color='red', width=1.2)), row=1, col=1, secondary_y=True)
+    if 'nasdaq_volume_m' in df.columns:
+        fig.add_trace(go.Bar(x=df['date'], y=df['nasdaq_volume_m'], marker_color='rgba(0, 0, 255, 0.6)', name='NASDAQ Volume (M)'), row=2, col=1)
+    if tops_df is not None and not tops_df.empty:
+        fig.add_trace(go.Scatter(x=tops_df['index_top_pos'], y=tops_df['VIX_top'], mode='markers', name='VIX Tops', marker=dict(symbol='circle', size=6, color='red', line=dict(width=1, color='darkred'))), row=1, col=1, secondary_y=True)
+
+    fig.update_xaxes(type='date', range=[df['date'].min(), df['date'].max()], showgrid=False)
+    fig.update_yaxes(title_text="NASDAQ", row=1, col=1, showgrid=True)
     fig.update_yaxes(title_text="VIX", row=1, col=1, secondary_y=True, showgrid=False)
     fig.update_yaxes(title_text="Volume", row=2, col=1)
     fig.update_layout(
@@ -186,5 +151,5 @@ def plot_nasdaq_and_vix(symbol, timeframe, df, tops_df=None, trades_df=None, hed
     )
 
     fig.write_html(html_path, config={"scrollZoom": True})
-    print(f"✅ Plotly chart saved as HTML: '{html_path}'")
+    print(f"✅ Gráfico Plotly guardado como HTML: '{html_path}'")
     webbrowser.open('file://' + os.path.realpath(html_path))

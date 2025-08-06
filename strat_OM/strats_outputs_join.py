@@ -1,51 +1,65 @@
+# Este código simplemente es una herramienta auxiliar para unir los dos dataframes, el de la estrategia principal y el del hedging
+# FILE: strat_OM/strats_outputs_join.py
+# COMBINA TODAS LAS ESTRATEGIAS (LONG + HEDGING CROSS + HEDGING EMA)
+# en realidad no es una estratagia de cobertura, sino que hace un join o unión de todas las que están activaas
 import pandas as pd
 
-def strats_outputs_join(result, hedge_trades_df, capital_inicial=100_000, output_path='outputs/VIX_strat_hedged.csv'):
+def strats_outputs_join(df_long: pd.DataFrame, df_cross: pd.DataFrame, df_ema: pd.DataFrame) -> pd.DataFrame:
     """
-    Combina dos estrategias: VIX Long y Hedge Short en un solo DataFrame,
-    calcula equity acumulada y guarda el resultado como CSV.
-
-    Parameters:
-    - result: DataFrame con operaciones de la estrategia VIX Long.
-    - hedge_trades_df: DataFrame con operaciones de cobertura.
-    - capital_inicial: capital inicial para calcular equity_pct.
-    - output_path: ruta donde guardar el CSV final combinado.
+    Combina los DataFrames de resultados de todas las estrategias:
+    - Estrategia principal (VIX Long)
+    - Estrategia de cobertura por cruce de medias (Hedge_Short_Cross)
+    - Estrategia de cobertura por cruce de close vs slow EMA (Hedge_Short_EMA)
 
     Returns:
-    - combined_trades_sorted: DataFrame combinado y enriquecido.
+        pd.DataFrame: Un DataFrame unificado con todas las operaciones.
     """
+    final_cols = ['strategy_type', 'entry_date', 'exit_date', 'entry_price', 'exit_price', 'profit_usd']
 
-    if result is not None and not result.empty and hedge_trades_df is not None and not hedge_trades_df.empty:
-        # Estrategia principal
-        df_long = result.copy()
-        df_long['strategy_type'] = 'VIX_Long'
-        df_long = df_long[['strategy_type', 'entry_date', 'exit_date', 'entry_price', 'exit_price', 'profit_usd']]
+    # --- Largos ---
+    df_long_final = pd.DataFrame(columns=final_cols)
+    if df_long is not None and not df_long.empty:
+        df_long_clean = df_long.copy()
+        df_long_clean['strategy_type'] = 'VIX_Long'
+        df_long_final = df_long_clean.rename(columns={
+            'entry_date': 'entry_date',
+            'exit_date': 'exit_date',
+            'entry_price': 'entry_price',
+            'exit_price': 'exit_price',
+            'profit_usd': 'profit_usd'
+        })[final_cols]
 
-        # Estrategia de cobertura
-        df_short = hedge_trades_df.copy()
-        df_short['strategy_type'] = 'Hedge_Short'
-        df_short = df_short[['strategy_type', 'entry_date', 'exit_date', 'entry_price', 'exit_price', 'profit_usd']]
+    # --- Cortos CROSS ---
+    df_cross_final = pd.DataFrame(columns=final_cols)
+    if df_cross is not None and not df_cross.empty:
+        df_cross_clean = df_cross.copy()
+        df_cross_clean['strategy_type'] = 'Hedge_Short_Cross'
+        df_cross_final = df_cross_clean.rename(columns={
+            'hedge_entry_date': 'entry_date',
+            'hedge_exit_date': 'exit_date',
+            'hedge_entry_price': 'entry_price',
+            'hedge_exit_price': 'exit_price',
+            'hedge_profit_usd': 'profit_usd'
+        })[final_cols]
 
-        # Combinar
-        combined_trades = pd.concat([df_long, df_short])
-        combined_trades_sorted = combined_trades.sort_values(by='entry_date').reset_index(drop=True)
+    # --- Cortos EMA ---
+    df_ema_final = pd.DataFrame(columns=final_cols)
+    if df_ema is not None and not df_ema.empty:
+        df_ema_clean = df_ema.copy()
+        df_ema_clean['strategy_type'] = 'Hedge_Short_EMA'
+        df_ema_final = df_ema_clean.rename(columns={
+            'hedge_entry_date': 'entry_date',
+            'hedge_exit_date': 'exit_date',
+            'hedge_entry_price': 'entry_price',
+            'hedge_exit_price': 'exit_price',
+            'hedge_profit_usd': 'profit_usd'
+        })[final_cols]
 
-        # Equity acumulada
-        combined_trades_sorted['equity_usd'] = combined_trades_sorted['profit_usd'].cumsum()
-        combined_trades_sorted['equity_pct'] = combined_trades_sorted['equity_usd'] / capital_inicial
+    # --- Combinar todo ---
+    combined = pd.concat([df_long_final, df_cross_final, df_ema_final], ignore_index=True)
 
-        # Output
-        print("\n" + "="*80)
-        print("📜 REGISTRO DE OPERACIONES COMBINADO (Estrategia Principal + Cobertura) 📜")
-        print("="*80)
-        print(combined_trades_sorted)
-        print("="*80 + "\n")
+    if combined.empty:
+        print("\nNo hay operaciones en ninguna de las estrategias para combinar.")
+        return pd.DataFrame()
 
-        combined_trades_sorted.to_csv(output_path, index=False)
-        print(f"💾 Registro combinado de operaciones guardado en: '{output_path}'")
-
-        return combined_trades_sorted
-
-    else:
-        print("\n⚠️ No se pudieron combinar los registros de operaciones porque uno o ambos están vacíos.")
-        return None
+    return combined.sort_values(by='entry_date').reset_index(drop=True)

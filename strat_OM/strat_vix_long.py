@@ -1,5 +1,5 @@
 # FILE: strat_OM/strat_vix_long.py
-# FINAL VERSION: Includes a "synced" benchmark starting from the strategy's level in Jan 2022.
+# Esta es la estrategia principal que abre sólo largos cuando la volatilidad cae desde un pico (top)
 
 import pandas as pd
 import numpy as np
